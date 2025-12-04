@@ -309,6 +309,12 @@
             box-shadow: 0 4px 12px rgba(79, 70, 229, 0.3);
         }
         
+        .btn-primary:disabled {
+            background: var(--border);
+            cursor: not-allowed;
+            transform: none;
+        }
+        
         .btn-block {
             width: 100%;
         }
@@ -455,6 +461,12 @@
             border: 1px solid #6EE7B7;
         }
         
+        .alert-error {
+            background: #FEE2E2;
+            color: #991B1B;
+            border: 1px solid #FCA5A5;
+        }
+        
         .alert-info {
             background: #DBEAFE;
             color: #1E40AF;
@@ -595,12 +607,17 @@
             <div class="card">
                 <div class="card-header">
                     <h2 class="card-title">➕ New Transaction</h2>
-                    <span class="badge badge-success">Auto-sync enabled</span>
+                    <span class="badge badge-success">🔗 Connected to API</span>
                 </div>
                 
                 <div id="successAlert" class="alert alert-success" style="display: none;">
                     <span>✅</span>
                     <span id="successMessage">Transaction posted successfully!</span>
+                </div>
+                
+                <div id="errorAlert" class="alert alert-error" style="display: none;">
+                    <span>❌</span>
+                    <span id="errorMessage">Error processing transaction</span>
                 </div>
                 
                 <form id="transactionForm" onsubmit="submitTransaction(event)">
@@ -652,7 +669,7 @@
                         <p style="margin-top: 12px; color: var(--text-light);">Processing transaction...</p>
                     </div>
                     
-                    <button type="submit" class="btn btn-primary btn-block">
+                    <button type="submit" class="btn btn-primary btn-block" id="submitBtn">
                         <span>✓</span>
                         Submit Transaction
                     </button>
@@ -723,12 +740,15 @@
         <div class="alert alert-info">
             <span>ℹ️</span>
             <div>
-                <strong>Auto-sync Active:</strong> All transactions are automatically posted to your Google Sheets following Maharashtra Board accounting principles. No manual intervention required.
+                <strong>Fully Automated:</strong> All transactions are automatically posted to your Google Sheets following Maharashtra Board accounting principles. Backend API connected at <code>cheery-torte-a7c49e.netlify.app</code>
             </div>
         </div>
     </div>
     
     <script>
+        // API Configuration
+        const API_ENDPOINT = 'https://cheery-torte-a7c49e.netlify.app/.netlify/functions/submit-transaction';
+        
         // Set today's date
         document.getElementById('transactionDate').valueAsDate = new Date();
         
@@ -745,49 +765,95 @@
             }
         });
         
-        function submitTransaction(event) {
+        async function submitTransaction(event) {
             event.preventDefault();
             
             const type = document.getElementById('transactionType').value;
-            const party = document.getElementById('partyName').value;
+            const partyName = document.getElementById('partyName').value;
             const amount = document.getElementById('amount').value;
             const description = document.getElementById('description').value;
             const date = document.getElementById('transactionDate').value;
             
             // Show loading
             document.getElementById('loading').style.display = 'block';
-            document.querySelector('.btn-primary').disabled = true;
+            document.getElementById('submitBtn').disabled = true;
+            document.getElementById('successAlert').style.display = 'none';
+            document.getElementById('errorAlert').style.display = 'none';
             
-            // Simulate API call
-            setTimeout(() => {
+            try {
+                // Call backend API
+                const response = await fetch(API_ENDPOINT, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        type,
+                        partyName,
+                        amount: parseFloat(amount),
+                        description,
+                        date
+                    })
+                });
+                
+                const result = await response.json();
+                
                 // Hide loading
                 document.getElementById('loading').style.display = 'none';
-                document.querySelector('.btn-primary').disabled = false;
+                document.getElementById('submitBtn').disabled = false;
                 
-                // Show success message
-                const successAlert = document.getElementById('successAlert');
-                const successMessage = document.getElementById('successMessage');
-                successMessage.textContent = `Transaction posted successfully! ${party} - ₹${amount}`;
-                successAlert.style.display = 'flex';
+                if (response.ok && result.success) {
+                    // Show success message
+                    const successAlert = document.getElementById('successAlert');
+                    const successMessage = document.getElementById('successMessage');
+                    successMessage.textContent = `✅ Transaction posted successfully! ${result.journalNumber} - ${partyName} - ₹${amount}`;
+                    successAlert.style.display = 'flex';
+                    
+                    // Add to recent transactions
+                    addRecentTransaction(partyName, description, date, amount, type);
+                    
+                    // Update stats
+                    updateStats(type, parseFloat(amount));
+                    
+                    // Reset form
+                    document.getElementById('transactionForm').reset();
+                    document.getElementById('transactionDate').valueAsDate = new Date();
+                    
+                    // Reset file upload area
+                    const uploadArea = document.querySelector('.file-upload-area');
+                    uploadArea.innerHTML = `
+                        <input type="file" id="fileInput" accept="image/*,.pdf">
+                        <div style="font-size: 48px; margin-bottom: 12px;">📎</div>
+                        <div style="font-weight: 600; margin-bottom: 4px;">Click to upload or drag & drop</div>
+                        <div style="font-size: 13px; color: var(--text-light);">PNG, JPG, PDF up to 10MB</div>
+                    `;
+                    
+                    // Hide success message after 5 seconds
+                    setTimeout(() => {
+                        successAlert.style.display = 'none';
+                    }, 5000);
+                } else {
+                    throw new Error(result.error || 'Failed to process transaction');
+                }
                 
-                // Add to recent transactions
-                addRecentTransaction(party, description, date, amount, type);
+            } catch (error) {
+                console.error('Error:', error);
                 
-                // Update stats
-                updateStats(type, parseFloat(amount));
+                // Hide loading
+                document.getElementById('loading').style.display = 'none';
+                document.getElementById('submitBtn').disabled = false;
                 
-                // Reset form
-                document.getElementById('transactionForm').reset();
-                document.getElementById('transactionDate').valueAsDate = new Date();
+                // Show error message
+                const errorAlert = document.getElementById('errorAlert');
+                const errorMessage = document.getElementById('errorMessage');
+                errorMessage.textContent = `Error: ${error.message}. Please check your backend API and Google Sheets configuration.`;
+                errorAlert.style.display = 'flex';
                 
-                // Hide success message after 5 seconds
+                // Hide error message after 8 seconds
                 setTimeout(() => {
-                    successAlert.style.display = 'none';
-                }, 5000);
-                
-                // Here you would make actual API call to update Google Sheets
-                console.log('Transaction data:', { type, party, amount, description, date });
-            }, 1500);
+                    errorAlert.style.display = 'none';
+                }, 8000);
+            }
         }
         
         function addRecentTransaction(party, desc, date, amount, type) {
